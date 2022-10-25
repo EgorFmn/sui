@@ -1955,7 +1955,7 @@ impl AuthorityState {
         let stored_events = match query {
             EventQuery::All => es.all_events(cursor, limit, descending).await?,
             EventQuery::Transaction(digest) => {
-                es.events_by_transaction(cursor, digest, limit, descending)
+                es.events_by_transaction(digest, cursor, limit, descending)
                     .await?
             }
             EventQuery::MoveModule { package, module } => {
@@ -1963,34 +1963,34 @@ impl AuthorityState {
                     AccountAddress::from(package),
                     Identifier::from_str(&module)?,
                 );
-                es.events_by_module_id(cursor, &module_id, limit, descending)
+                es.events_by_module_id(&module_id, cursor, limit, descending)
                     .await?
             }
             EventQuery::MoveEvent(struct_name) => {
-                es.events_by_move_event_struct_name(cursor, &struct_name, limit, descending)
+                es.events_by_move_event_struct_name(&struct_name, cursor, limit, descending)
                     .await?
             }
             EventQuery::Sender(sender) => {
-                es.events_by_sender(cursor, &sender, limit, descending)
+                es.events_by_sender(&sender, cursor, limit, descending)
                     .await?
             }
             EventQuery::Recipient(recipient) => {
-                es.events_by_recipient(cursor, &recipient, limit, descending)
+                es.events_by_recipient(&recipient, cursor, limit, descending)
                     .await?
             }
             EventQuery::Object(object) => {
-                es.events_by_object(cursor, &object, limit, descending)
+                es.events_by_object(&object, cursor, limit, descending)
                     .await?
             }
             EventQuery::TimeRange {
                 start_time,
                 end_time,
             } => {
-                es.event_iterator(cursor, start_time, end_time, limit, descending)
+                es.event_iterator(start_time, end_time, cursor, limit, descending)
                     .await?
             }
             EventQuery::EventType(event_type) => {
-                es.events_by_type(cursor, event_type, limit, descending)
+                es.events_by_type(event_type, cursor, limit, descending)
                     .await?
             }
         };
