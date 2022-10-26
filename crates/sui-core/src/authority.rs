@@ -665,7 +665,6 @@ impl AuthorityState {
         &self,
         certificate: &VerifiedCertificate,
     ) -> SuiResult<VerifiedTransactionInfoResponse> {
-        let _metrics_guard = start_timer(self.metrics.handle_certificate_latency.clone());
         self.handle_certificate_impl(certificate, false).await
     }
 
@@ -683,6 +682,7 @@ impl AuthorityState {
         certificate: &VerifiedCertificate,
         bypass_validator_halt: bool,
     ) -> SuiResult<VerifiedTransactionInfoResponse> {
+        let _metrics_guard = start_timer(self.metrics.handle_certificate_latency.clone());
         self.metrics.total_cert_attempts.inc();
         if self.is_fullnode() {
             return Err(SuiError::GenericStorageError(
@@ -1614,19 +1614,15 @@ impl AuthorityState {
         .await
     }
 
-    /// Add a number of certificates to the pending transactions as well as the
-    /// certificates structure if they are not already executed.
-    /// Certificates are optional, and if not provided, they will be eventually
-    /// downloaded in the execution driver.
-    pub fn add_pending_certificates(
-        &self,
-        certs: Vec<(TransactionDigest, Option<VerifiedCertificate>)>,
-    ) -> SuiResult<()> {
+    /// Adds certificates to the certificate store and the pending certificates structure for
+    /// later execution.
+    pub fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
+        // TODO: Make sure there will not be issues after crash and recovery,
+        // e.g. if certs are written into batch store, then node crashes before adding to pending.
         self.node_sync_store
-            .batch_store_certs(certs.iter().filter_map(|(_, cert_opt)| cert_opt.clone()))?;
-
+            .batch_store_certs(certs.iter().cloned())?;
         self.database
-            .add_pending_digests(certs.iter().map(|(digest, _)| *digest).collect())
+            .add_pending_digests(certs.iter().map(|cert| *cert.digest()).collect())
     }
 
     // Continually pop in-progress txes from the WAL and try to drive them to completion.
@@ -2321,10 +2317,7 @@ impl AuthorityState {
                 );
 
                 // Schedule the certificate for execution
-                self.add_pending_certificates(vec![(
-                    *certificate.digest(),
-                    Some(certificate.clone()),
-                )])?;
+                self.add_pending_certificates(vec![certificate.clone()])?;
 
                 self.database
                     .lock_shared_objects(&certificate, consensus_index)

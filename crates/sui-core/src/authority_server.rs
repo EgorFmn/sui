@@ -465,7 +465,7 @@ impl ValidatorService {
                 Err(e) => {
                     // Record the cert for later execution, including causal completion if necessary.
                     let _ = state
-                        .add_pending_certificates(vec![(tx_digest, Some(certificate))])
+                        .add_pending_certificates(vec![certificate])
                         .tap_err(|e| error!(?tx_digest, "add_pending_certificates failed: {}", e));
                     return Err(tonic::Status::from(e));
                 }

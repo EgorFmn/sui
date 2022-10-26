@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{collections::HashSet, sync::Arc};
-use sui_types::{base_types::TransactionDigest, error::SuiResult, messages::VerifiedCertificate};
+use sui_types::{error::SuiResult, messages::VerifiedCertificate};
 use tracing::{debug, info};
 
 use crate::authority::AuthorityState;
@@ -18,17 +18,11 @@ use tap::TapFallible;
 pub(crate) mod tests;
 
 pub trait PendCertificateForExecution {
-    fn add_pending_certificates(
-        &self,
-        certs: Vec<(TransactionDigest, Option<VerifiedCertificate>)>,
-    ) -> SuiResult<()>;
+    fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()>;
 }
 
 impl PendCertificateForExecution for &AuthorityState {
-    fn add_pending_certificates(
-        &self,
-        certs: Vec<(TransactionDigest, Option<VerifiedCertificate>)>,
-    ) -> SuiResult<()> {
+    fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
         AuthorityState::add_pending_certificates(self, certs)
     }
 }
@@ -37,10 +31,7 @@ impl PendCertificateForExecution for &AuthorityState {
 /// we do not care about certificates actually being executed.
 pub struct PendCertificateForExecutionNoop;
 impl PendCertificateForExecution for PendCertificateForExecutionNoop {
-    fn add_pending_certificates(
-        &self,
-        _certs: Vec<(TransactionDigest, Option<VerifiedCertificate>)>,
-    ) -> SuiResult<()> {
+    fn add_pending_certificates(&self, _certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
         Ok(())
     }
 }

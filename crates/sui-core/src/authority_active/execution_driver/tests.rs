@@ -83,12 +83,7 @@ async fn pending_exec_storage_notify() {
     // Insert the certificates
     let num_certs = certs.len();
     authority_state
-        .add_pending_certificates(
-            certs
-                .into_iter()
-                .map(|cert| (*cert.digest(), Some(cert)))
-                .collect(),
-        )
+        .add_pending_certificates(certs)
         .expect("Storage is ok");
 
     tokio::task::yield_now().await;
@@ -169,12 +164,7 @@ async fn pending_exec_full() {
     // Insert the certificates
     let num_certs = certs.len();
     authority_state
-        .add_pending_certificates(
-            certs
-                .into_iter()
-                .map(|cert| (*cert.digest(), Some(cert)))
-                .collect(),
-        )
+        .add_pending_certificates(certs)
         .expect("Storage is ok");
     let certs_back = authority_state
         .database
@@ -239,7 +229,10 @@ async fn test_parent_cert_exec() {
     do_transaction(authority_clients[0], &tx2).await;
     do_transaction(authority_clients[1], &tx2).await;
     do_transaction(authority_clients[2], &tx2).await;
-    let cert2 = extract_cert(&authority_clients, &aggregator.committee, tx2.digest()).await;
+    let cert2 = extract_cert(&authority_clients, &aggregator.committee, tx2.digest())
+        .await
+        .verify(&aggregator.committee)
+        .unwrap();
     do_cert(authority_clients[0], &cert2).await;
     info!(digest = ?tx2.digest(), "cert2 finished");
 
@@ -262,7 +255,7 @@ async fn test_parent_cert_exec() {
     active_state.clone().spawn_execute_process().await;
 
     authorities[3]
-        .add_pending_certificates(vec![(*tx2.digest(), None)])
+        .add_pending_certificates(vec![cert2])
         .unwrap();
 
     wait_for_tx(*tx2.digest(), authorities[3].clone()).await;
