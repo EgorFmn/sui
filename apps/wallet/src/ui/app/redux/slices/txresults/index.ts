@@ -98,7 +98,7 @@ export const getTransactionsByAddress = createAsyncThunk<
         const transactions: GetTxnDigestsResponse =
             await api.instance.fullNode.getTransactionsForAddress(
                 address,
-                'Descending'
+                true
             );
 
         if (!transactions || !transactions.length) {
