@@ -234,11 +234,12 @@ impl StoredEvent {
     /// Returns Err when any conversion fails.
     pub fn into_event_envelopes(
         stored_events: Vec<Self>,
-    ) -> Result<Vec<SuiEventEnvelope>, anyhow::Error> {
+    ) -> Result<Vec<(EventID, SuiEventEnvelope)>, anyhow::Error> {
         let mut events = Vec::with_capacity(stored_events.len());
         for stored_event in stored_events {
+            let id = stored_event.id.clone();
             let event_envelope: SuiEventEnvelope = stored_event.try_into()?;
-            events.push(event_envelope);
+            events.push((id, event_envelope));
         }
         Ok(events)
     }
@@ -342,7 +343,6 @@ impl TryInto<SuiEventEnvelope> for StoredEvent {
     type Error = anyhow::Error;
     fn try_into(self) -> Result<SuiEventEnvelope, Self::Error> {
         let timestamp = self.timestamp;
-        let id = self.id;
         let tx_digest = self.tx_digest;
         let event_type_str = self.event_type.as_str();
         let event = match EventType::from_str(event_type_str) {
@@ -363,7 +363,6 @@ impl TryInto<SuiEventEnvelope> for StoredEvent {
             Err(e) => anyhow::bail!("Invalid EventType {event_type_str}: {e:?}"),
         }?;
         Ok(SuiEventEnvelope {
-            id,
             timestamp,
             tx_digest,
             event,
@@ -404,7 +403,7 @@ pub trait EventStore {
     /// Returns at most `limit` events emitted by all transaction, ordered .
     async fn all_events(
         &self,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -413,7 +412,7 @@ pub trait EventStore {
     async fn events_by_transaction(
         &self,
         digest: TransactionDigest,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -424,7 +423,7 @@ pub trait EventStore {
     async fn events_by_type(
         &self,
         event_type: EventType,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -434,7 +433,7 @@ pub trait EventStore {
     async fn events_by_module_id(
         &self,
         module: &ModuleId,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -445,7 +444,7 @@ pub trait EventStore {
     async fn events_by_move_event_struct_name(
         &self,
         move_event_struct_name: &str,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -455,7 +454,7 @@ pub trait EventStore {
     async fn events_by_sender(
         &self,
         sender: &SuiAddress,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -465,7 +464,7 @@ pub trait EventStore {
     async fn events_by_recipient(
         &self,
         recipient: &Owner,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -475,7 +474,7 @@ pub trait EventStore {
     async fn events_by_object(
         &self,
         object: &ObjectID,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -486,7 +485,7 @@ pub trait EventStore {
         &self,
         start_time: u64,
         end_time: u64,
-        cursor: EventID,
+        cursor: (u64, u64),
         limit: usize,
         descending: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
