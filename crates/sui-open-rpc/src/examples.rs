@@ -368,7 +368,10 @@ impl RpcExampleProvider {
                         "query",
                         json!(TransactionQuery::InputObject(ObjectID::new(self.rng.gen()))),
                     ),
-                    ("cursor", json!(10)),
+                    (
+                        "cursor",
+                        json!("8n7y9+zMf7DVqvLCAi+Xd1qrSBa7vjWoF5keAEUxCbo="),
+                    ),
                     ("limit", json!(100)),
                     ("order", json!(Ordering::Ascending)),
                 ],
@@ -483,7 +486,7 @@ impl RpcExampleProvider {
         let (_, _, _, _, result, events) = self.get_transfer_data_response();
         let page = EventPage {
             data: events.clone(),
-            next_cursor: Some("1000:5".into()),
+            next_cursor: Some((1000, 5).into()),
         };
         Examples::new(
             "sui_getEvents",
@@ -496,7 +499,7 @@ impl RpcExampleProvider {
                             result.certificate.transaction_digest
                         )),
                     ),
-                    ("cursor", json!(10)),
+                    ("cursor", json!("10:0")),
                     ("limit", json!(events.len())),
                     ("order", json!(Ordering::Ascending)),
                 ],
