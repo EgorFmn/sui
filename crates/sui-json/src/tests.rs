@@ -390,7 +390,7 @@ fn test_basic_args_linter_top_level() {
     let monster_description_raw = "MonsterDescription";
     let display_raw = "DisplayUrl";
 
-    let player_id = json!(format!("0x{:02x}", ObjectID::random()));
+    let player_id = json!(format!("{}", ObjectID::random()));
     // This is okay since not starting with 0x
     let monster_name = json!(monster_name_raw);
     // Well within U64 bounds
@@ -477,8 +477,8 @@ fn test_basic_args_linter_top_level() {
     let address = SuiAddress::random_for_testing_only();
 
     let value = json!(value_raw);
-    // Encode as hex string
-    let addr = json!(format!("0x{:02x}", address));
+    // Encode as bech32 string
+    let addr = json!(format!("{}", address));
 
     // They have to be ordered
     let args = vec![value, addr]
@@ -512,9 +512,9 @@ fn test_basic_args_linter_top_level() {
     let object_id_raw = ObjectID::random();
     let address = SuiAddress::random_for_testing_only();
 
-    let object_id = json!(format!("0x{:02x}", object_id_raw));
-    // Encode as hex string
-    let addr = json!(format!("0x{:02x}", address));
+    let object_id = json!(format!("{}", object_id_raw));
+    // Encode as Bech32 string
+    let addr = json!(format!("{}", address));
 
     // They have to be ordered
     let args = vec![object_id, addr]
@@ -524,12 +524,7 @@ fn test_basic_args_linter_top_level() {
 
     let args = resolve_move_function_args(framework_pkg, module, function, &[], args).unwrap();
 
-    assert_eq!(
-        args[0],
-        SuiJsonCallArg::Object(
-            ObjectID::from_hex_literal(&format!("0x{:02x}", object_id_raw)).unwrap()
-        )
-    );
+    assert_eq!(args[0], SuiJsonCallArg::Object(object_id_raw));
 
     // Need to verify this specially
     // BCS serialzes addresses like vectors so there's a length prefix, which makes the vec longer by 1
@@ -554,8 +549,8 @@ fn test_basic_args_linter_top_level() {
      */
     let object_id_raw1 = ObjectID::random();
     let object_id_raw2 = ObjectID::random();
-    let object_id1 = json!(format!("0x{:02x}", object_id_raw1));
-    let object_id2 = json!(format!("0x{:02x}", object_id_raw2));
+    let object_id1 = json!(format!("{}", object_id_raw1));
+    let object_id2 = json!(format!("{}", object_id_raw2));
 
     let args = vec![SuiJsonValue::new(Value::Array(vec![object_id1, object_id2])).unwrap()];
 
@@ -565,14 +560,8 @@ fn test_basic_args_linter_top_level() {
 
     if let SuiJsonCallArg::ObjVec(vec) = &args[0] {
         assert_eq!(vec.len(), 2);
-        assert_eq!(
-            vec[0],
-            ObjectID::from_hex_literal(&format!("0x{:02x}", object_id_raw1)).unwrap()
-        );
-        assert_eq!(
-            vec[1],
-            ObjectID::from_hex_literal(&format!("0x{:02x}", object_id_raw2)).unwrap()
-        );
+        assert_eq!(vec[0], object_id_raw);
+        assert_eq!(vec[1], object_id_raw2);
     }
 }
 

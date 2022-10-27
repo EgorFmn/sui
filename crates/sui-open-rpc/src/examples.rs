@@ -584,7 +584,10 @@ impl RpcExampleProvider {
             event: SuiEvent::MoveEvent {
                 package_id: ObjectID::from_hex_literal("0x2").unwrap(),
                 transaction_module: String::from("devnet_nft"),
-                sender: SuiAddress::from_str("0x9421e7ad826ba13aca8ae41316644f06759b4506").unwrap(),
+                sender: SuiAddress::from_str(
+                    "sui1tqdprxn9wmfm2q44m3ruthjf0dm5u6x2cdm3n2py44a57ete07gsg5xll6",
+                )
+                .unwrap(),
                 type_: String::from("0x2::devnet_nft::MintNFTEvent"),
                 fields: None,
                 bcs: vec![],

@@ -32,6 +32,7 @@ use crate::error::ExecutionError;
 use crate::error::ExecutionErrorKind;
 use crate::error::SuiError;
 use crate::object::{Object, Owner};
+use crate::sui_serde::Bech32;
 use crate::sui_serde::Readable;
 use crate::waypoint::IntoPoint;
 use fastcrypto::encoding::{Base64, Encoding, Hex};
@@ -72,8 +73,8 @@ pub type AuthorityName = AuthorityPublicKeyBytes;
 #[serde_as]
 #[derive(Eq, PartialEq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ObjectID(
-    #[schemars(with = "Hex")]
-    #[serde_as(as = "Readable<Hex, _>")]
+    #[schemars(with = "Bech32")]
+    #[serde_as(as = "Readable<Bech32, _>")]
     AccountAddress,
 );
 
@@ -135,8 +136,8 @@ pub const SUI_ADDRESS_LENGTH: usize = ObjectID::LENGTH;
     Eq, Default, PartialEq, Ord, PartialOrd, Copy, Clone, Hash, Serialize, Deserialize, JsonSchema,
 )]
 pub struct SuiAddress(
-    #[schemars(with = "Hex")]
-    #[serde_as(as = "Readable<Hex, _>")]
+    #[schemars(with = "Bech32")]
+    #[serde_as(as = "Readable<Bech32, _>")]
     [u8; SUI_ADDRESS_LENGTH],
 );
 
@@ -158,7 +159,7 @@ impl SuiAddress {
     where
         S: serde::ser::Serializer,
     {
-        serializer.serialize_str(&key.map(encode_bytes_hex).unwrap_or_default())
+        serializer.serialize_str(&key.map(Bech32::encode).unwrap_or_default())
     }
 
     pub fn optional_address_from_hex<'de, D>(
@@ -168,8 +169,10 @@ impl SuiAddress {
         D: serde::de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let value = decode_bytes_hex(&s).map_err(serde::de::Error::custom)?;
-        Ok(Some(value))
+        let value = Bech32::decode(&s).map_err(serde::de::Error::custom)?;
+        let mut array = [0u8; SUI_ADDRESS_LENGTH];
+        array.copy_from_slice(&value[..SUI_ADDRESS_LENGTH]);
+        Ok(Some(SuiAddress(array)))
     }
 
     pub fn to_inner(self) -> [u8; SUI_ADDRESS_LENGTH] {
@@ -559,31 +562,13 @@ pub fn decode_bytes_hex<T: for<'a> TryFrom<&'a [u8]>>(s: &str) -> Result<T, anyh
 
 impl fmt::Display for SuiAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#x}", self)
+        write!(f, "{}", Bech32::encode(self.0))
     }
 }
 
 impl fmt::Debug for SuiAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self)
-    }
-}
-
-impl fmt::LowerHex for SuiAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            write!(f, "0x")?;
-        }
-        write!(f, "{}", encode_bytes_hex(self))
-    }
-}
-
-impl fmt::UpperHex for SuiAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            write!(f, "0x")?;
-        }
-        write!(f, "{}", encode_bytes_hex(self).to_uppercase())
+        write!(f, "{}", Bech32::encode(self.0))
     }
 }
 
@@ -738,7 +723,6 @@ impl ObjectID {
         if !literal.starts_with("0x") {
             return Err(ObjectIDParseError::HexLiteralPrefixMissing);
         }
-
         let hex_len = literal.len() - 2;
 
         // If the string is too short, pad it
@@ -748,9 +732,13 @@ impl ObjectID {
                 hex_str.push('0');
             }
             hex_str.push_str(&literal[2..]);
-            Self::from_hex(hex_str)
+            Self::from_bytes(
+                Hex::decode(&hex_str).map_err(|_| ObjectIDParseError::TryFromSliceError)?,
+            )
         } else {
-            Self::from_hex(&literal[2..])
+            Self::from_bytes(
+                Hex::decode(literal).map_err(|_| ObjectIDParseError::TryFromSliceError)?,
+            )
         }
     }
 
@@ -907,31 +895,13 @@ impl From<SuiAddress> for AccountAddress {
 
 impl fmt::Display for ObjectID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#x}", self)
+        write!(f, "{}", Bech32::encode(self.0))
     }
 }
 
 impl fmt::Debug for ObjectID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self)
-    }
-}
-
-impl fmt::LowerHex for ObjectID {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            write!(f, "0x")?;
-        }
-        write!(f, "{}", encode_bytes_hex(self))
-    }
-}
-
-impl fmt::UpperHex for ObjectID {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            write!(f, "0x")?;
-        }
-        write!(f, "{}", encode_bytes_hex(self).to_uppercase())
+        write!(f, "{}", Bech32::encode(self.0))
     }
 }
 
@@ -970,7 +940,7 @@ impl TryFrom<String> for ObjectID {
 impl FromStr for SuiAddress {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, anyhow::Error> {
-        decode_bytes_hex(s)
+        SuiAddress::try_from(Bech32::decode(s).map_err(|e| anyhow!(e))?).map_err(|e| anyhow!(e))
     }
 }
 

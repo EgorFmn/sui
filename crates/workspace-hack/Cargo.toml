@@ -56,6 +56,7 @@ base16ct = { version = "0.1", default-features = false }
 base64 = { version = "0.13", features = ["alloc", "std"] }
 base64ct = { version = "1", default-features = false, features = ["alloc"] }
 bcs = { version = "0.1", default-features = false }
+bech32 = { version = "0.9", features = ["std"] }
 beef = { version = "0.5", features = ["impl_serde", "serde"] }
 better_any = { version = "0.1", default-features = false }
 bimap = { version = "0.6", features = ["std"] }
@@ -313,7 +314,7 @@ move-bytecode-viewer = { git = "https://github.com/move-language/move", rev = "b
 move-cli = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
 move-command-line-common = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
 move-compiler = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
-move-core-types = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", features = ["address20"] }
+move-core-types = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", features = ["address32"] }
 move-coverage = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93" }
 move-disassembler = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93" }
 move-docgen = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
@@ -685,6 +686,7 @@ base16ct = { version = "0.1", default-features = false }
 base64 = { version = "0.13", features = ["alloc", "std"] }
 base64ct = { version = "1", default-features = false, features = ["alloc"] }
 bcs = { version = "0.1", default-features = false }
+bech32 = { version = "0.9", features = ["std"] }
 beef = { version = "0.5", features = ["impl_serde", "serde"] }
 better_any = { version = "0.1", default-features = false }
 better_typeid_derive = { version = "0.1", default-features = false }
@@ -974,7 +976,7 @@ move-bytecode-viewer = { git = "https://github.com/move-language/move", rev = "b
 move-cli = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
 move-command-line-common = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
 move-compiler = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }
-move-core-types = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", features = ["address20"] }
+move-core-types = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", features = ["address32"] }
 move-coverage = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93" }
 move-disassembler = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93" }
 move-docgen = { git = "https://github.com/move-language/move", rev = "be52c7118aeb94fbbfa12590e420a75e8ddfec93", default-features = false }

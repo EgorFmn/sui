@@ -4,6 +4,8 @@
 import BN from 'bn.js';
 import { Buffer } from 'buffer';
 import sha3 from 'js-sha3';
+import { bech32 } from 'bech32';
+
 import {
   checkPublicKeyData,
   PublicKeyInitData,
@@ -96,6 +98,7 @@ export class Ed25519PublicKey {
     let tmp = new Uint8Array(PUBLIC_KEY_SIZE + 1);
     tmp.set([SIGNATURE_SCHEME_TO_FLAG['ED25519']]);
     tmp.set(this.toBytes(), 1);
-    return sha3.sha3_256(tmp).slice(0, 40);
+    let words = bech32.toWords(Buffer.from(sha3.sha3_256(tmp).slice(0, 64), 'hex'));
+    return bech32.encode('sui', words);
   }
 }

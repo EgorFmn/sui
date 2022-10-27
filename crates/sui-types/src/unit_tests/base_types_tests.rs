@@ -98,16 +98,15 @@ fn test_object_id_conversions() {}
 
 #[test]
 fn test_object_id_display() {
+    // Result generated from https://slowli.github.io/bech32-buffer/
+    // Selecting Data tab with hrp = "sui"
     let hex = "ca843279e3427144cead5e4d5999a3d05999a3d0";
-    let upper_hex = "CA843279E3427144CEAD5E4D5999A3D05999A3D0";
-
     let id = ObjectID::from_hex(hex).unwrap();
 
-    assert_eq!(format!("{:?}", id), format!("0x{hex}"));
-    assert_eq!(format!("{:X}", id), upper_hex);
-    assert_eq!(format!("{:x}", id), hex);
-    assert_eq!(format!("{:#x}", id), format!("0x{hex}"));
-    assert_eq!(format!("{:#X}", id), format!("0x{upper_hex}"));
+    assert_eq!(
+        format!("{:?}", id),
+        "sui1e2zry70rgfc5fn4dtex4nxdr6pveng7smnlle6"
+    );
 }
 
 #[test]
@@ -218,15 +217,9 @@ fn test_object_id_zero_padding() {
 
 #[test]
 fn test_address_display() {
-    let hex = "ca843279e3427144cead5e4d5999a3d05999a3d0";
-    let upper_hex = "CA843279E3427144CEAD5E4D5999A3D05999A3D0";
-
-    let id = SuiAddress::from_str(hex).unwrap();
-    assert_eq!(format!("{:?}", id), format!("0x{hex}"));
-    assert_eq!(format!("{:X}", id), upper_hex);
-    assert_eq!(format!("{:x}", id), hex);
-    assert_eq!(format!("{:#x}", id), format!("0x{hex}"));
-    assert_eq!(format!("{:#X}", id), format!("0x{upper_hex}"));
+    let bech32_address = "sui1sau0w2w6j38k2tqtx0t87w9uaackz4gq5qagletswavsnc3n59ksjtk7gf";
+    let id = SuiAddress::from_str(bech32_address).unwrap();
+    assert_eq!(format!("{:?}", id), bech32_address);
 }
 
 #[test]

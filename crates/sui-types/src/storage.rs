@@ -35,6 +35,7 @@ pub enum DeleteKind {
     Wrap,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum ObjectChange {
     Write(SingleTxContext, Object, WriteKind),
     Delete(SingleTxContext, SequenceNumber, DeleteKind),
