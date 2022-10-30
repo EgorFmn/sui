@@ -22,6 +22,7 @@ import {
   SuiExecuteTransactionResponse,
   TransactionDigest,
   ObjectId,
+  SuiAddress,
   EventQuery,
   EventId,
   PaginatedTransactionDigests,
