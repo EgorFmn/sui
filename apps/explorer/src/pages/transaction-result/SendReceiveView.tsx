@@ -29,11 +29,7 @@ function SendRecieveView({ data }: { data: TxAddress }) {
                     data.recipient?.length ? styles.recipient : '',
                 ])}
             >
-                <Longtext
-                    text={data.sender}
-                    category="addresses"
-                    isLink={true}
-                />
+                <Longtext text={data.sender} category="addresses" isLink />
                 {data.recipient && (
                     <ul className={styles.txrecipents}>
                         {data.recipient.map((add: string, idx: number) => (
@@ -41,7 +37,7 @@ function SendRecieveView({ data }: { data: TxAddress }) {
                                 <Longtext
                                     text={add}
                                     category="addresses"
-                                    isLink={true}
+                                    isLink
                                     alttext={add}
                                 />
                             </li>
