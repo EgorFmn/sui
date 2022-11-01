@@ -810,7 +810,7 @@ impl AuthorityState {
         // this function occur before we have written anything to the db, so we commit the tx
         // guard and rely on the client to retry the tx (if it was transient).
         let (inner_temporary_store, signed_effects) =
-            match self.prepare_certificate(certificate, digest).await {
+            match self.prepare_certificate(certificate).await {
                 Err(e) => {
                     debug!(name = ?self.name, ?digest, "Error preparing transaction: {e}");
                     tx_guard.release();
@@ -899,7 +899,6 @@ impl AuthorityState {
     async fn prepare_certificate(
         &self,
         certificate: &VerifiedCertificate,
-        transaction_digest: TransactionDigest,
     ) -> SuiResult<(InnerTemporaryStore, SignedTransactionEffects)> {
         let _metrics_guard = start_timer(self.metrics.prepare_certificate_latency.clone());
         let (gas_status, input_objects) =
@@ -916,7 +915,7 @@ impl AuthorityState {
             // only be executed at a time when consensus is turned off.
             // TODO: Add some assert here to make sure consensus is indeed off with
             // is_change_epoch_tx.
-            self.check_shared_locks(&transaction_digest, &shared_object_refs)
+            self.check_shared_locks(certificate.digest(), &shared_object_refs)
                 .await?;
         }
 
@@ -927,13 +926,13 @@ impl AuthorityState {
 
         let transaction_dependencies = input_objects.transaction_dependencies();
         let temporary_store =
-            TemporaryStore::new(self.database.clone(), input_objects, transaction_digest);
+            TemporaryStore::new(self.database.clone(), input_objects, *certificate.digest());
         let (inner_temp_store, effects, _execution_error) =
             execution_engine::execute_transaction_to_effects(
                 shared_object_refs,
                 temporary_store,
                 certificate.signed_data.data.clone(),
-                transaction_digest,
+                *certificate.digest(),
                 transaction_dependencies,
                 &self.move_vm,
                 &self._native_functions,
@@ -2316,12 +2315,16 @@ impl AuthorityState {
                     "handle_consensus_transaction UserTransaction",
                 );
 
-                // Schedule the certificate for execution
-                self.add_pending_certificates(vec![certificate.clone()])?;
-
+                // Lock before scheduling pending certificates, otherwise the schedule certificates
+                // may run immediately but unable to find locks.
+                // TODO: verify recovery correctness. Or redesign the flow here / use an atomic
+                // write.
                 self.database
                     .lock_shared_objects(&certificate, consensus_index)
                     .await?;
+
+                // Schedule the certificate for execution
+                self.add_pending_certificates(vec![certificate.clone()])?;
 
                 Ok(())
             }

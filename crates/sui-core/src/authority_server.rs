@@ -39,7 +39,7 @@ use sui_types::messages_checkpoint::CheckpointRequest;
 use sui_types::messages_checkpoint::CheckpointResponse;
 
 use crate::consensus_handler::ConsensusHandler;
-use tracing::{debug, error, info, Instrument};
+use tracing::{debug, info, Instrument, error};
 
 #[cfg(test)]
 #[path = "unit_tests/server_tests.rs"]
@@ -462,11 +462,16 @@ impl ValidatorService {
                     sleep(Duration::from_millis(retry_delay_ms)).await;
                     retry_delay_ms *= 2;
                 }
-                Err(e) => {
+                Err(e) => {                    
                     // Record the cert for later execution, including causal completion if necessary.
-                    let _ = state
-                        .add_pending_certificates(vec![certificate])
-                        .tap_err(|e| error!(?tx_digest, "add_pending_certificates failed: {}", e));
+                    // This helps the node more closely stay in sync with other nodes for owned
+                    // object transactions. For shared object transactions, just rely on the consensus
+                    // for data sync.
+                    if !is_consensus_tx {
+                        let _ = state
+                            .add_pending_certificates(vec![certificate])
+                            .tap_err(|e| error!(?tx_digest, "add_pending_certificates failed: {}", e));
+                    }
                     return Err(tonic::Status::from(e));
                 }
                 Ok(response) => {
