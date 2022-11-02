@@ -1,5 +1,16 @@
 # @mysten/sui.js
 
+## 0.16.0
+
+### Minor Changes
+
+- 01989d3d5: Remove usage of Buffer within SDK
+
+### Patch Changes
+
+- Updated dependencies [1a0968636]
+  - @mysten/bcs@0.5.0
+
 ## 0.15.0
 
 ### Minor Changes
