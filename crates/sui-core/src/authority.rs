@@ -1620,8 +1620,7 @@ impl AuthorityState {
         // e.g. if certs are written into batch store, then node crashes before adding to pending.
         self.node_sync_store
             .batch_store_certs(certs.iter().cloned())?;
-        self.database
-            .add_pending_digests(certs.iter().map(|cert| *cert.digest()).collect())
+        self.database.add_pending_certificates(certs)
     }
 
     // Continually pop in-progress txes from the WAL and try to drive them to completion.

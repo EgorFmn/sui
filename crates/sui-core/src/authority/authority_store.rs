@@ -213,28 +213,25 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         self.epoch_tables().next_object_versions.get(obj).unwrap()
     }
 
-    /// Add a number of certificates to the pending transactions as well as the
-    /// certificates structure if they are not already executed.
-    /// Certificates are optional, and if not provided, they will be eventually
-    /// downloaded in the execution driver.
+    /// Add a number of certificates to the pending certificates structure.
     ///
     /// This function may be run concurrently: it increases atomically an internal index
     /// by the number of certificates passed, and then records the certificates and their
     /// index. If two instanced run concurrently, the indexes are guaranteed to not overlap
     /// although some certificates may be included twice in the `pending_execution`, and
     /// the same certificate may be written twice (but that is OK since it is valid.)
-    pub fn add_pending_digests(&self, digests: Vec<TransactionDigest>) -> SuiResult<()> {
+    pub fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
         let first_index = self
             .next_pending_seq
-            .fetch_add(digests.len() as u64, Ordering::Relaxed);
+            .fetch_add(certs.len() as u64, Ordering::Relaxed);
 
         let batch = self.epoch_tables().pending_execution.batch();
         let batch = batch.insert_batch(
             &self.epoch_tables().pending_execution,
-            digests
+            certs
                 .iter()
                 .enumerate()
-                .map(|(num, digest)| ((num as u64) + first_index, digest)),
+                .map(|(num, cert)| ((num as u64) + first_index, cert.digest())),
         )?;
         batch.write()?;
 
@@ -311,7 +308,10 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         Ok(result)
     }
 
-    pub fn get_input_objects(&self, objects: &[InputObjectKind]) -> Result<Vec<Object>, SuiError> {
+    pub fn check_input_objects(
+        &self,
+        objects: &[InputObjectKind],
+    ) -> Result<Vec<Object>, SuiError> {
         let mut result = Vec::new();
         let mut errors = Vec::new();
         for kind in objects {
@@ -335,7 +335,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         }
     }
 
-    pub fn get_sequenced_input_objects(
+    pub fn check_sequenced_input_objects(
         &self,
         digest: &TransactionDigest,
         objects: &[InputObjectKind],
