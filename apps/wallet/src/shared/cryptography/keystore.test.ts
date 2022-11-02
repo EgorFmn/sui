@@ -14,7 +14,7 @@ describe('keystore', () => {
             Buffer.from(plaintext, 'utf8')
         );
         const result = await decrypt(password, ciphertext);
-        expect(Buffer.from(result).toString('utf8')).toEqual(plaintext);
+        expect(result.toString('utf8')).toEqual(plaintext);
     });
 
     it('encrypt and decrypt failed with wrong password', async () => {
