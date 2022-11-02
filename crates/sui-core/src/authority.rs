@@ -2,9 +2,11 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{
     collections::{HashMap, VecDeque},
     pin::Pin,
@@ -29,10 +31,12 @@ use prometheus::{
     register_int_gauge_with_registry, Histogram, IntCounter, IntGauge,
 };
 use tap::TapFallible;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{
     broadcast::{self, error::RecvError},
     mpsc,
 };
+use tokio::time::sleep;
 use tracing::Instrument;
 use tracing::{debug, error, instrument, warn};
 use typed_store::Map;
@@ -99,6 +103,8 @@ use crate::{
     transaction_streamer::TransactionStreamer,
 };
 
+use self::authority_store::ObjectKey;
+
 #[cfg(test)]
 #[path = "unit_tests/authority_tests.rs"]
 pub mod authority_tests;
@@ -151,6 +157,10 @@ pub struct AuthorityMetrics {
     handle_transaction_latency: Histogram,
     handle_certificate_latency: Histogram,
     handle_node_sync_certificate_latency: Histogram,
+
+    object_manager_num_missing_objects: IntGauge,
+    object_manager_num_pending_digests: IntGauge,
+    object_manager_num_ready: IntGauge,
 
     total_consensus_txns: IntCounter,
     skipped_consensus_txns: IntCounter,
@@ -293,6 +303,24 @@ impl AuthorityMetrics {
                 "fullnode_handle_node_sync_certificate_latency",
                 "Latency of fullnode handling certificate from node sync",
                 LATENCY_SEC_BUCKETS.to_vec(),
+                registry,
+            )
+            .unwrap(),
+            object_manager_num_missing_objects: register_int_gauge_with_registry!(
+                "object_manager_num_missing_objects",
+                "Current number of missing objects in ObjectManager",
+                registry,
+            )
+            .unwrap(),
+            object_manager_num_pending_digests: register_int_gauge_with_registry!(
+                "object_manager_num_pending_digests",
+                "Current number of pending digests in ObjectManager",
+                registry,
+            )
+            .unwrap(),
+            object_manager_num_ready: register_int_gauge_with_registry!(
+                "object_manager_num_ready",
+                "Current number of ready digests in ObjectManager",
                 registry,
             )
             .unwrap(),
@@ -453,6 +481,99 @@ impl AuthorityMetrics {
 pub type StableSyncAuthoritySigner =
     Pin<Arc<dyn signature::Signer<AuthoritySignature> + Send + Sync>>;
 
+struct ObjectManager {
+    store: Arc<AuthorityStore>,
+    metrics: Arc<AuthorityMetrics>,
+    missing_inputs: BTreeMap<ObjectKey, TransactionDigest>,
+    pending_digests: BTreeMap<TransactionDigest, BTreeSet<ObjectKey>>,
+    tx_ready_digests: UnboundedSender<TransactionDigest>,
+}
+
+impl ObjectManager {
+    fn recover(
+        store: Arc<AuthorityStore>,
+        metrics: Arc<AuthorityMetrics>,
+    ) -> (ObjectManager, UnboundedReceiver<TransactionDigest>) {
+        let (tx_ready_digests, rx_ready_digests) = unbounded_channel();
+        let mut obj_manager = ObjectManager {
+            store: store.clone(),
+            metrics,
+            missing_inputs: BTreeMap::new(),
+            pending_digests: BTreeMap::new(),
+            tx_ready_digests,
+        };
+        let mut certs = Vec::new();
+        for digest in store.get_pending_digests().unwrap() {
+            certs.push(store.get_certified_transaction(&digest).unwrap().unwrap());
+        }
+        obj_manager
+            .enqueue(certs)
+            .expect("Initialize ObjectManager with pending certificates failed.");
+        (obj_manager, rx_ready_digests)
+    }
+
+    fn enqueue(&mut self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
+        self.store
+            .add_pending_digests(certs.iter().map(|c| *c.digest()).collect())?;
+        for cert in certs {
+            let digest = *cert.digest();
+            let (_, missing, _) = self
+                .store
+                .get_sequenced_input_objects(&digest, &cert.signed_data.data.input_objects()?)?;
+            if missing.is_empty() {
+                self.digest_ready(digest);
+                continue;
+            }
+            for key in missing {
+                // TODO: verify the key does not already exist.
+                self.missing_inputs.insert(key, digest);
+                self.pending_digests.entry(digest).or_default().insert(key);
+            }
+        }
+        self.metrics
+            .object_manager_num_missing_objects
+            .set(self.missing_inputs.len() as i64);
+        self.metrics
+            .object_manager_num_pending_digests
+            .set(self.pending_digests.len() as i64);
+        Ok(())
+    }
+
+    fn digest_ready(&self, digest: TransactionDigest) {
+        self.metrics.object_manager_num_ready.inc();
+        let _ = self.tx_ready_digests.send(digest);
+    }
+
+    fn check_input_objects(&mut self) {
+        let mut created_objects = Vec::new();
+        for (object_key, digest) in self.missing_inputs.iter() {
+            let result = if object_key.1 == SequenceNumber::MAX {
+                self.store.get_object(&object_key.0)
+            } else {
+                self.store.get_object_by_key(&object_key.0, object_key.1)
+            };
+            if let Ok(Some(_)) = result {
+                created_objects.push((*object_key, *digest));
+            }
+        }
+        for (object_key, digest) in created_objects {
+            self.missing_inputs.remove(&object_key);
+            let set = self.pending_digests.entry(digest).or_default();
+            set.remove(&object_key);
+            if set.is_empty() {
+                self.pending_digests.remove(&digest);
+                self.digest_ready(digest);
+            }
+        }
+        self.metrics
+            .object_manager_num_missing_objects
+            .set(self.missing_inputs.len() as i64);
+        self.metrics
+            .object_manager_num_pending_digests
+            .set(self.pending_digests.len() as i64);
+    }
+}
+
 pub struct AuthorityState {
     // Fixed size, static, identity of the authority
     /// The name of this authority.
@@ -484,6 +605,9 @@ pub struct AuthorityState {
     pub checkpoints: Arc<Mutex<CheckpointStore>>,
 
     committee_store: Arc<CommitteeStore>,
+
+    object_manager: Arc<tokio::sync::Mutex<ObjectManager>>,
+    rx_ready_digests: tokio::sync::Mutex<UnboundedReceiver<TransactionDigest>>,
 
     // Structures needed for handling batching and notifications.
     /// The sender to notify of new transactions
@@ -1463,8 +1587,11 @@ impl AuthorityState {
         }
 
         let committee = committee_store.get_latest_committee();
-
         let event_handler = event_store.map(|es| Arc::new(EventHandler::new(store.clone(), es)));
+        let metrics = Arc::new(AuthorityMetrics::new(prometheus_registry));
+        let (object_manager, rx_ready_digests) =
+            ObjectManager::recover(store.clone(), metrics.clone());
+        let object_manager = Arc::new(tokio::sync::Mutex::new(object_manager));
 
         let mut state = AuthorityState {
             name,
@@ -1482,13 +1609,15 @@ impl AuthorityState {
             transaction_streamer,
             checkpoints,
             committee_store,
+            object_manager: object_manager.clone(),
+            rx_ready_digests: tokio::sync::Mutex::new(rx_ready_digests),
             batch_channels: tx,
             batch_notifier: Arc::new(
                 authority_notifier::TransactionNotifier::new(store.clone(), prometheus_registry)
                     .expect("Notifier cannot start."),
             ),
             consensus_guardrail: AtomicUsize::new(0),
-            metrics: Arc::new(AuthorityMetrics::new(prometheus_registry)),
+            metrics,
             tx_reconfigure_consensus,
         };
 
@@ -1537,6 +1666,12 @@ impl AuthorityState {
                     .expect("Should see no errors updating the checkpointing mechanism.");
             }
         }
+
+        tokio::task::spawn(async move {
+            let mut object_manager = object_manager.lock().await;
+            object_manager.check_input_objects();
+            sleep(Duration::from_secs(2)).await;
+        });
 
         state
     }
@@ -1615,12 +1750,13 @@ impl AuthorityState {
 
     /// Adds certificates to the certificate store and the pending certificates structure for
     /// later execution.
-    pub fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
+    pub async fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
         // TODO: Make sure there will not be issues after crash and recovery,
         // e.g. if certs are written into batch store, then node crashes before adding to pending.
         self.node_sync_store
             .batch_store_certs(certs.iter().cloned())?;
-        self.database.add_pending_certificates(certs)
+        let mut object_manager = self.object_manager.lock().await;
+        object_manager.enqueue(certs)
     }
 
     // Continually pop in-progress txes from the WAL and try to drive them to completion.
@@ -1705,6 +1841,15 @@ impl AuthorityState {
         object_id: &ObjectID,
     ) -> Result<Option<Object>, SuiError> {
         self.database.get_object(object_id)
+    }
+
+    pub(crate) async fn next_ready_digest(&self) -> Option<TransactionDigest> {
+        let mut rx_ready_digests = self.rx_ready_digests.lock().await;
+        let digest = rx_ready_digests.recv().await;
+        if digest.is_some() {
+            self.metrics.object_manager_num_ready.dec();
+        }
+        digest
     }
 
     pub async fn get_framework_object_ref(&self) -> SuiResult<ObjectRef> {
@@ -2323,7 +2468,8 @@ impl AuthorityState {
                     .await?;
 
                 // Schedule the certificate for execution
-                self.add_pending_certificates(vec![certificate.clone()])?;
+                self.add_pending_certificates(vec![certificate.clone()])
+                    .await?;
 
                 Ok(())
             }

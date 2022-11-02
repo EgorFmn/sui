@@ -14,7 +14,7 @@ use serde_with::serde_as;
 use std::collections::BTreeMap;
 use std::iter;
 use std::path::Path;
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::Arc;
 use std::{fmt::Debug, path::PathBuf};
 use sui_storage::{
     mutex_table::{LockGuard, MutexTable},
@@ -34,8 +34,6 @@ use typed_store::traits::Map;
 
 pub type AuthorityStore = SuiDataStore<AuthoritySignInfo>;
 pub type GatewayStore = SuiDataStore<EmptySignInfo>;
-
-pub type InternalSequenceNumber = u64;
 
 pub struct CertLockGuard(LockGuard);
 
@@ -63,8 +61,6 @@ pub struct SuiDataStore<S> {
     /// Internal vector of locks to manage concurrent writes to the database
     mutex_table: MutexTable<ObjectDigest>,
 
-    // The next sequence number.
-    next_pending_seq: AtomicU64,
     // A notifier for new pending certificates
     pending_notifier: Arc<Notify>,
 
@@ -98,21 +94,10 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         let wal_path = path.join("recovery_log");
         let wal = Arc::new(DBWriteAheadLog::new(wal_path));
 
-        // Get the last sequence item
-        let pending_seq = epoch_tables
-            .pending_execution
-            .iter()
-            .skip_to_last()
-            .next()
-            .map(|(seq, _)| seq + 1)
-            .unwrap_or(0);
-        let next_pending_seq = AtomicU64::new(pending_seq);
-
         Ok(Self {
             wal,
             lock_service,
             mutex_table: MutexTable::new(NUM_SHARDS, SHARD_SIZE),
-            next_pending_seq,
             pending_notifier: Arc::new(Notify::new()),
             perpetual_tables,
             epoch_tables: epoch_tables.into(),
@@ -213,25 +198,12 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         self.epoch_tables().next_object_versions.get(obj).unwrap()
     }
 
-    /// Add a number of certificates to the pending certificates structure.
-    ///
-    /// This function may be run concurrently: it increases atomically an internal index
-    /// by the number of certificates passed, and then records the certificates and their
-    /// index. If two instanced run concurrently, the indexes are guaranteed to not overlap
-    /// although some certificates may be included twice in the `pending_execution`, and
-    /// the same certificate may be written twice (but that is OK since it is valid.)
-    pub fn add_pending_certificates(&self, certs: Vec<VerifiedCertificate>) -> SuiResult<()> {
-        let first_index = self
-            .next_pending_seq
-            .fetch_add(certs.len() as u64, Ordering::Relaxed);
-
+    /// Adds a number of digests to the pending digests table.
+    pub fn add_pending_digests(&self, digests: Vec<TransactionDigest>) -> SuiResult<()> {
         let batch = self.epoch_tables().pending_execution.batch();
         let batch = batch.insert_batch(
             &self.epoch_tables().pending_execution,
-            certs
-                .iter()
-                .enumerate()
-                .map(|(num, cert)| ((num as u64) + first_index, cert.digest())),
+            digests.into_iter().map(|digest| (digest, true)),
         )?;
         batch.write()?;
 
@@ -241,15 +213,18 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         Ok(())
     }
 
-    /// Get all stored certificate digests
-    pub fn get_pending_digests(
-        &self,
-    ) -> SuiResult<Vec<(InternalSequenceNumber, TransactionDigest)>> {
-        Ok(self.epoch_tables().pending_execution.iter().collect())
+    /// Get all stored pending digests
+    pub fn get_pending_digests(&self) -> SuiResult<Vec<TransactionDigest>> {
+        Ok(self
+            .epoch_tables()
+            .pending_execution
+            .iter()
+            .map(|(digest, _)| digest)
+            .collect())
     }
 
     /// Remove entries from pending certificates
-    pub fn remove_pending_digests(&self, seqs: Vec<InternalSequenceNumber>) -> SuiResult<()> {
+    pub fn remove_pending_digests(&self, seqs: Vec<TransactionDigest>) -> SuiResult<()> {
         let batch = self.epoch_tables().pending_execution.batch();
         let batch = batch.delete_batch(&self.epoch_tables().pending_execution, seqs.iter())?;
         batch.write()?;
@@ -335,17 +310,19 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         }
     }
 
-    pub fn check_sequenced_input_objects(
+    #[allow(clippy::type_complexity)]
+    pub fn get_sequenced_input_objects(
         &self,
         digest: &TransactionDigest,
         objects: &[InputObjectKind],
-    ) -> Result<Vec<Object>, SuiError> {
+    ) -> Result<(Vec<Object>, Vec<ObjectKey>, Vec<SuiError>), SuiError> {
         let shared_locks_cell: OnceCell<HashMap<_, _>> = OnceCell::new();
 
         let mut result = Vec::new();
+        let mut missing = Vec::new();
         let mut errors = Vec::new();
         for kind in objects {
-            let obj = match kind {
+            match kind {
                 InputObjectKind::SharedMoveObject { id, .. } => {
                     let shared_locks = shared_locks_cell.get_or_try_init(|| {
                         Ok::<HashMap<ObjectID, SequenceNumber>, SuiError>(
@@ -359,30 +336,47 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
                             } else {
                                 // When this happens, other transactions that use smaller versions of
                                 // this shared object haven't finished execution.
+                                missing.push(ObjectKey(*id, *version));
                                 errors.push(SuiError::SharedObjectPriorVersionsPendingExecution {
                                     object_id: *id,
                                     version_not_ready: *version,
                                 });
                             }
-                            continue;
                         }
                         None => {
-                            errors.push(SuiError::SharedObjectLockNotSetError);
-                            continue;
+                            // Abort the function because the lock should have been set.
+                            return Err(SuiError::SharedObjectLockNotSetError);
+                        }
+                    };
+                }
+                InputObjectKind::MovePackage(id) => match self.get_object(id)? {
+                    Some(obj) => result.push(obj),
+                    None => {
+                        missing.push(ObjectKey::max_for_id(id));
+                        errors.push(kind.object_not_found_error());
+                    }
+                },
+                InputObjectKind::ImmOrOwnedMoveObject(objref) => {
+                    match self.get_object_by_key(&objref.0, objref.1)? {
+                        Some(obj) => result.push(obj),
+                        None => {
+                            missing.push(ObjectKey::from(objref));
+                            errors.push(kind.object_not_found_error());
                         }
                     }
                 }
-                InputObjectKind::MovePackage(id) => self.get_object(id)?,
-                InputObjectKind::ImmOrOwnedMoveObject(objref) => {
-                    self.get_object_by_key(&objref.0, objref.1)?
-                }
             };
-            // SharedMoveObject should not reach here
-            match obj {
-                Some(obj) => result.push(obj),
-                None => errors.push(kind.object_not_found_error()),
-            }
         }
+
+        Ok((result, missing, errors))
+    }
+
+    pub fn check_sequenced_input_objects(
+        &self,
+        digest: &TransactionDigest,
+        objects: &[InputObjectKind],
+    ) -> Result<Vec<Object>, SuiError> {
+        let (result, _, errors) = self.get_sequenced_input_objects(digest, objects)?;
         if !errors.is_empty() {
             Err(SuiError::TransactionInputObjectsErrors { errors })
         } else {

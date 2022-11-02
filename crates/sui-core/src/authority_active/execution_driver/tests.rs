@@ -84,6 +84,7 @@ async fn pending_exec_storage_notify() {
     let num_certs = certs.len();
     authority_state
         .add_pending_certificates(certs)
+        .await
         .expect("Storage is ok");
 
     tokio::task::yield_now().await;
@@ -165,6 +166,7 @@ async fn pending_exec_full() {
     let num_certs = certs.len();
     authority_state
         .add_pending_certificates(certs)
+        .await
         .expect("Storage is ok");
     let certs_back = authority_state
         .database
@@ -256,6 +258,7 @@ async fn test_parent_cert_exec() {
 
     authorities[3]
         .add_pending_certificates(vec![cert2])
+        .await
         .unwrap();
 
     wait_for_tx(*tx2.digest(), authorities[3].clone()).await;
