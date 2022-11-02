@@ -72,10 +72,10 @@ pub enum Command {
     /// A request to synchronize and output the block headers
     /// This will not perform any attempt to fetch the header's
     /// batches. This component does NOT check whether the
-    /// requested block_ids are already synchronized. This is the
+    /// requested digests are already synchronized. This is the
     /// consumer's responsibility.
     SynchronizeBlockHeaders {
-        block_ids: Vec<CertificateDigest>,
+        digests: Vec<CertificateDigest>,
         respond_to: ResultSender,
     },
     /// A request to synchronize the payload (batches) of the
@@ -88,7 +88,7 @@ pub enum Command {
     /// and this might relax the requirement to need certificates here.
     ///
     /// This component does NOT check whether the
-    //  requested block_ids are already synchronized. This is the
+    //  requested digests are already synchronized. This is the
     //  consumer's responsibility.
     SynchronizeBlockPayload {
         certificates: Vec<Certificate>,
@@ -115,18 +115,20 @@ enum State {
 
 #[derive(Debug, Error, Copy, Clone)]
 pub enum SyncError {
-    #[error("Block with id {block_id} was not returned in any peer response")]
-    NoResponse { block_id: CertificateDigest },
+    #[error("Certificate with digest {digest} was not returned in any peer response")]
+    NoResponse { digest: CertificateDigest },
 
-    #[error("Block with id {block_id} could not be retrieved, timeout while retrieving result")]
-    Timeout { block_id: CertificateDigest },
+    #[error(
+        "Certificate with digest {digest} could not be retrieved, timeout while retrieving result"
+    )]
+    Timeout { digest: CertificateDigest },
 }
 
 impl SyncError {
     #[allow(dead_code)]
-    pub fn block_id(&self) -> CertificateDigest {
+    pub fn digest(&self) -> CertificateDigest {
         match *self {
-            SyncError::NoResponse { block_id } | SyncError::Timeout { block_id } => block_id,
+            SyncError::NoResponse { digest } | SyncError::Timeout { digest } => digest,
         }
     }
 }
@@ -139,9 +141,9 @@ enum PendingIdentifier {
 
 impl PendingIdentifier {
     #[allow(dead_code)]
-    fn id(&self) -> CertificateDigest {
+    fn digest(&self) -> CertificateDigest {
         match self {
-            Header(id) | Payload(id) => *id,
+            Header(digest) | Payload(digest) => *digest,
         }
     }
 }
@@ -242,8 +244,8 @@ impl BlockSynchronizer {
             tokio::select! {
                 Some(command) = self.rx_block_synchronizer_commands.recv() => {
                     match command {
-                        Command::SynchronizeBlockHeaders { block_ids, respond_to } => {
-                            let fut = self.handle_synchronize_block_headers_command(block_ids, respond_to).await;
+                        Command::SynchronizeBlockHeaders { digests, respond_to } => {
+                            let fut = self.handle_synchronize_block_headers_command(digests, respond_to).await;
                             if fut.is_some() {
                                 waiting.push(fut.unwrap());
                             }
@@ -261,8 +263,8 @@ impl BlockSynchronizer {
                         State::HeadersSynchronized { certificates } => {
                             debug!("Result for the block headers synchronize request with certs {certificates:?}");
 
-                            for (id, result) in certificates {
-                                self.notify_requestors_for_result(Header(id), result).await;
+                            for (digest, result) in certificates {
+                                self.notify_requestors_for_result(Header(digest), result).await;
                             }
                         },
                         State::PayloadAvailabilityReceived { certificates, peers } => {
@@ -274,19 +276,19 @@ impl BlockSynchronizer {
                                 waiting.push(fut);
                             }
 
-                            // notify immediately for block_ids that have been errored or timedout
-                            for (id, result) in certificates {
+                            // notify immediately for digests that have been errored or timedout
+                            for (digest, result) in certificates {
                                 if result.is_err() {
-                                    self.notify_requestors_for_result(Payload(id), result).await;
+                                    self.notify_requestors_for_result(Payload(digest), result).await;
                                 }
                             }
                         },
                         State::PayloadSynchronized { result } => {
-                            let id = result.as_ref().map_or_else(|e| e.block_id(), |r| r.certificate.digest());
+                            let digest = result.as_ref().map_or_else(|e| e.digest(), |r| r.certificate.digest());
 
-                            debug!("Block payload synchronize result received for certificate id {id}");
+                            debug!("Block payload synchronize result received for certificate digest {digest}");
 
-                            self.notify_requestors_for_result(Payload(id), result).await;
+                            self.notify_requestors_for_result(Payload(digest), result).await;
                         },
                     }
                 }
@@ -358,7 +360,7 @@ impl BlockSynchronizer {
         respond_to: ResultSender,
     ) -> Option<BoxFuture<'a, State>> {
         let mut certificates_to_sync = Vec::new();
-        let mut block_ids_to_sync = Vec::new();
+        let mut digests_to_sync = Vec::new();
 
         let missing_certificates = self
             .reply_with_payload_already_in_storage(certificates.clone(), respond_to.clone())
@@ -369,7 +371,7 @@ impl BlockSynchronizer {
 
             if self.resolve_pending_request(Payload(block_id), respond_to.clone()) {
                 certificates_to_sync.push(certificate);
-                block_ids_to_sync.push(block_id);
+                digests_to_sync.push(block_id);
             } else {
                 trace!("Nothing to request here, it's already in pending state");
             }
@@ -387,7 +389,7 @@ impl BlockSynchronizer {
         // requested that are missing a payload
 
         let request = PayloadAvailabilityRequest {
-            certificate_ids: block_ids_to_sync,
+            certificate_digests: digests_to_sync,
         };
         let primaries: Vec<_> = self
             .committee
@@ -656,7 +658,7 @@ impl BlockSynchronizer {
         }
     }
 
-    #[instrument(level = "trace", skip_all, fields(request_id, certificate=?certificate.header.id()))]
+    #[instrument(level = "trace", skip_all, fields(request_id, certificate=?certificate.header.digest()))]
     async fn wait_for_block_payload<'a>(
         payload_synchronize_timeout: Duration,
         payload_store: Store<(BatchDigest, WorkerId), PayloadToken>,
@@ -679,7 +681,7 @@ impl BlockSynchronizer {
         {
             return State::PayloadSynchronized {
                 result: Err(SyncError::Timeout {
-                    block_id: certificate.digest(),
+                    digest: certificate.digest(),
                 }),
             };
         }
@@ -874,7 +876,7 @@ impl BlockSynchronizer {
             // we reject the payload - it shouldn't happen. Also, add the
             // found ones in a vector.
             let mut available_certs_for_peer = Vec::new();
-            for id in response.body().available_block_ids() {
+            for id in response.body().available_certificates() {
                 if let Some(c) = certificates_by_id.get(&id) {
                     available_certs_for_peer.push(c.clone());
                 } else {
@@ -946,9 +948,9 @@ impl BlockSynchronizer {
                     }),
                 );
             } else if timeout {
-                result.insert(block_id, Err(SyncError::Timeout { block_id }));
+                result.insert(block_id, Err(SyncError::Timeout { digest: block_id }));
             } else {
-                result.insert(block_id, Err(SyncError::NoResponse { block_id }));
+                result.insert(block_id, Err(SyncError::NoResponse { digest: block_id }));
             }
         }
 

@@ -200,12 +200,12 @@ impl HeaderWaiter {
                     match message {
                         WaiterMessage::SyncBatches(missing, header) => {
                             debug!("Synching the payload of {header}");
-                            let header_id = header.id();
+                            let header_digest = header.digest();
                             let round = header.round;
                             let author = header.author.clone();
 
                             // Ensure we sync only once per header.
-                            if self.pending.contains_key(&header_id) {
+                            if self.pending.contains_key(&header_digest) {
                                 continue;
                             }
 
@@ -232,7 +232,7 @@ impl HeaderWaiter {
                             // Add the header to the waiter pool. The waiter will return it to when all
                             // its parents are in the store.
                             let (tx_cancel, rx_cancel) = oneshot::channel();
-                            self.pending.insert(header_id, (round, tx_cancel));
+                            self.pending.insert(header_digest, (round, tx_cancel));
                             let fut = Self::wait_for_batches(
                                 requires_sync,
                                 synchronize_handles,
@@ -246,12 +246,12 @@ impl HeaderWaiter {
 
                         WaiterMessage::SyncParents(missing, header) => {
                             debug!("Synching the parents of {header}");
-                            let header_id = header.id();
+                            let header_digest = header.digest();
                             let round = header.round;
                             let author = header.author.clone();
 
                             // Ensure we sync only once per header.
-                            if self.pending.contains_key(&header_id) {
+                            if self.pending.contains_key(&header_digest) {
                                 continue;
                             }
                             self.metrics.last_parent_missing_round
@@ -282,7 +282,7 @@ impl HeaderWaiter {
                             // Add the header to the waiter pool. The waiter will return it to us
                             // when all its parents are in the store.
                             let (tx_cancel, rx_cancel) = oneshot::channel();
-                            self.pending.insert(header_id, (round, tx_cancel));
+                            self.pending.insert(header_digest, (round, tx_cancel));
                             let fut = Self::wait_for_parents(
                                 missing,
                                 network_future,
@@ -307,7 +307,7 @@ impl HeaderWaiter {
                         Ok(header) => header,
                     };
                     if let Some(header) = header {
-                        if let Some((_, tx_cancel)) = self.pending.remove(&header.id()) {
+                        if let Some((_, tx_cancel)) = self.pending.remove(&header.digest()) {
                             let _ = tx_cancel.send(());
                         }
                         for x in header.payload.keys() {
